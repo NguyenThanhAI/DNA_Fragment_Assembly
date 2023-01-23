@@ -7,7 +7,6 @@ from edge import Edge
 from read import Read
 
 
-
 class Graph(object):
     
     def __init__(self, seqs: Optional[Loader], k: int, threshold: int, error_correct: bool = False) -> None:
@@ -51,6 +50,7 @@ class Graph(object):
             seq: str = seqs[s]
             # Tạo object Read
             read: Read = Read(sequence=seq, read_id=s)
+            self.read_list.append(read)
             
             # Tạo các đỉnh và các cạnh
             for i in range(len(seq)-k+1):
