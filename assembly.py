@@ -48,7 +48,7 @@ class Assembler(object):
                 y: Edge = read.edges[i+1]
                 # Kiểm tra xem các cạnh có gộp được không
                 if self.graph.is_mergeable(p=p, x=x, y=y):
-                    if self.graph.merge(x, y):
+                    if self.graph.merge(x=x, y=y):
                         return True
                     
         return False
@@ -143,11 +143,12 @@ class Assembler(object):
             # Lặp tất cả các cạnh chưa được đi qua
             while edge != None:
                 edge.visited = True
-                current_path.append(edge.out_vertex)
+                current_path.append(edge)
+                edge = self.graph.get_unvisited(edge.out_vertex)
                 
         # In kết quả bằng cách thêm vào phía trước danh sách
         sequence: str = ""
-        while len(final_path):
+        while len(final_path) > 0:
             edge = final_path.pop()
             if len(final_path) == 0: # Cạnh cuối cùng
                 sequence += edge.sequence
@@ -156,7 +157,4 @@ class Assembler(object):
                 sequence += edge.sequence[:s_len-self.k+1] # Chỉ lấy các ký tự đầu
                 
         return sequence
-        
-
-
-        
+               
