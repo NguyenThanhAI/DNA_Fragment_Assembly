@@ -1,6 +1,6 @@
 import copy
 import math
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from loader import Loader
 from vertex import Vertex
 from edge import Edge
@@ -29,6 +29,59 @@ class Graph(object):
         self.seqs: Optional[Loader] = seqs # Các read được đọc từ loader
         self.threshold: int = threshold # Ngưỡng để sửa lỗi
         
+        # k_mers là danh sách của các danh sách của các k-mer, corrected_seqs là danh sách của các danh sách của các k-mers đã được chỉnh sửa
+        self.corrected_seqs, self.k_mers = self.error_correction(threshold=self.threshold)
+            
+        # Ghép lại các k-mer khi đã sửa lỗi
+        for n in range(len(self.corrected_seqs)):
+            new_read: str = ""
+            for i in self.corrected_seqs[n]:
+                if new_read == "":
+                    new_read += i
+                else:
+                    new_read += i[-1]
+            self.corrected_seqs[n] = new_read
+            
+        
+        if error_correct:
+            self.seqs: List[str] = self.corrected_seqs
+            
+        for s in range(len(seqs)):
+            # Lấy các read
+            seq: str = seqs[s]
+            # Tạo object Read
+            read: Read = Read(sequence=seq, read_id=s)
+            
+            # Tạo các đỉnh và các cạnh
+            for i in range(len(seq)-k+1):
+                # Tạo k-mer
+                k_mer: str = seq[i:i+k]
+                prefix: str = k_mer[:k-1]
+                suffix: str = k_mer[1:]
+                
+                # Tạo đỉnh tiền tố
+                if prefix in self.vertex_dict:
+                    p_vertex: Vertex = self.vertex_dict[prefix]
+                else:
+                    p_vertex: Vertex = self.new_vertex(sequence=prefix)
+                    
+                # Tạo đỉnh hậu tố
+                if suffix in self.vertex_dict:
+                    s_vertex: Vertex = self.vertex_dict[suffix]
+                else:
+                    s_vertex: Vertex = self.new_vertex(sequence=suffix)
+                    
+                # Tạo cạnh
+                if k_mer in self.edge_dict:
+                    edge: Edge = self.edge_dict[k_mer]
+                else:
+                    edge: Edge = self.new_edge(in_vertex=p_vertex, out_vertex=s_vertex, sequence=k_mer)
+                    
+                # Thêm cạnh vào danh sách cạnh của read
+                read.edges.append(edge)
+                # Thêm read vào danh sách read của cạnh
+                edge.reads.append(read)                
+                
         
     def __str__(self) -> str:
         """_summary_
@@ -209,4 +262,119 @@ class Graph(object):
         # Xóa các cạnh rỗng
         for edge in to_remove_edge:
             self.edge_list.remove(edge)
-            
+    
+    
+    def error_correction(self, threshold: int) -> Tuple[List[str], List[str]]:
+        """Sửa lỗi các reads và lưu vào đồ thị
+
+        Args:
+            threshold (int): Ngưỡng sửa lỗi để một k-mers được gọi là "đặc"
+
+        Returns:
+            Tuplle[List[str], List[str]]: Danh sách các k-mers được sửa lỗi và danh sách các k-mers gốc
+        """
+        
+        """
+        Là danh sách của từng danh sách của các k-mers, 
+        mỗi danh sách con là danh sách của các k-mers từ một read
+        """
+        list_sequences: List[List[str]] = []
+        freq_dict: Dict[str, int] = {}
+        
+        for read in self.seqs:
+            one_sequence_kmers: List[str] = [] # Danh sách các k-mers từ một read
+            for i in range(len(read)-(self.k)+1):
+                one_sequence_kmers.append(read[i:i+(self.k)])
+                # Tính số lần xuất hiện theo k-mers
+                if read[i:i+(self.k)] not in freq_dict:
+                    freq_dict[read[i:i+(self.k)]] = 1
+                else:
+                    freq_dict[read[i:i+(self.k)]] += 1
+            list_sequences.append(one_sequence_kmers)
+        
+        seq_list: List[List[str]] = copy.deepcopy(list_sequences)
+        
+        # Lặp qua từng read của list sequence
+        for read in seq_list:
+            # Lặp qua từng k-mer trong từng danh sách con (đại diện cho từng read)
+            for i in range(len(read)):
+                k_mer: str = read[i]
+                
+                """
+                Tra số lần xuất hiện của k-mers trong bảng tần số và 
+                kiểm tra số lần xuất hiện có lớn hơn hoặc bằng ngưỡng hay không?
+                """
+                ocurrences: int = freq_dict[k_mer]
+                if ocurrences < threshold:
+                    """
+                    Nếu số lần xuất hiện trong bảng tần số ít hơn ngưỡng, ta kiểm tra thêm k-1 k-mer tiếp theo và 
+                    nếu số lần xuất hiện cũng những k-mer này cũng nhỏ hơn ngưỡng.
+                    Nếu k/2 trong số k-mer này số lần xuất hiện cũng nhỏ hơn ngưỡng, 
+                    ta cần phải thay đổi, nếu không ta giữ nguyên
+                    """
+                    cutoff = math.ceil((len(k_mer)/2.0))
+                    # Lặp thêm k-1 k-mer sau k-mer hiện tại
+                    for j in range(len(k_mer)): # range(1, len(k_mer))?????
+                        if i + j >= len(read):
+                            break
+                        if freq_dict[read[i+j]] < threshold:
+                            cutoff -= 1
+
+                        # Nếu quá nhiều k-mer ngay sau dưới ngưỡng, ta cần phải sửa lỗi
+                        if cutoff <= 0: # Sai lề???????
+                            choices: List[str] = ["A", "C", "G", "T"]
+                            best_score: int = 0
+                            k_mer_to_change: int = -1 # k-mer đầu tiên cần được thay đổi
+                            letter: int = -1 # Chỉ số vị trí của ký tự cần bị thay đổi trong tập các lựa chọn A, C, G, T
+
+                            # Chỉ lặp qua một nửa số ký tự trong k-mer
+                            for x in range(int(math.ceil(len(k_mer)/2.0))):
+                                index: int = -1 - x
+                                # Theo dõi score của từng ký tự
+                                scores: List[int] = [0, 0, 0, 0]
+                                for y in range(len(k_mer)-x):
+                                    # Lặp qua từng k-mer cũng bao gồm ký tự để so sánh score
+                                    k_mer_index: int = (i) + y
+                                    if k_mer_index >= len(read) or k_mer_index < 0:
+                                        continue
+                                    for n in range(len(choices)):
+                                        option: str = str(read[k_mer_index])
+                                        option_list: List[str] = list(option)
+                                        new_index: int = index - y
+                                        if new_index < -len(k_mer):
+                                            new_index += len(k_mer)
+                                        option_list[new_index] = choices[n]
+                                        option_back_to_string: str = "".join(option_list)
+                                        option = option_back_to_string
+                                        if option in freq_dict:
+                                            # Thêm vào chênh lệch về số lần xuất hiện của k-mer thay thế và k-mer ban đầu
+                                            scores[n] += (freq_dict[option] - freq_dict[read[k_mer_index]])
+                                        else:
+                                            # Trừ đi nếu không trong bảng tần số
+                                            scores[n] -= 10
+
+                                for n in range(len(scores)):
+                                    if scores[n] > best_score:
+                                        best_score = scores[n]
+                                        k_mer_to_change = (i - x)
+                                        letter = n
+
+                            if best_score == 0:
+                                # Giữ nguyên ban đầu
+                                continue
+                            else:
+                                # Thay đổi k-mer
+                                for p in range(len(k_mer)): # Thay đổi thành -x
+                                    if (p + k_mer_to_change) < len(read):
+                                        freq_dict[read[k_mer_to_change + p]] -= 1
+                                        list_of_k_mer: List[str] = list(read[k_mer_to_change + p])
+                                        list_of_k_mer[-(p+1)] = choices[letter]
+                                        back_to_string = "".join(list_of_k_mer)
+                                        read[k_mer_to_change + p] = back_to_string
+                                        if read[k_mer_to_change + p] in freq_dict:
+                                            freq_dict[read[k_mer_to_change + p]] += 1
+                                        else:
+                                            freq_dict[read[k_mer_to_change + p]] = 1
+                            
+        return seq_list, list_sequences
+                    
